@@ -8,4 +8,6 @@ services:
       - SUPABASE_URL=${SUPABASE_URL}
       - DISCORD_WEBHOOK=${DISCORD_WEBHOOK}
       - SCHEDULE_TIME=01:00
-      - KEEP_DAYS=30
+      - KEEP_DAILY=7
+      - KEEP_WEEKLY=4
+      - KEEP_MONTHLY=3
