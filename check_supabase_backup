@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""
+CheckMK local check for Supabase backup status.
+Install to: /usr/lib/check_mk_agent/local/check_supabase_backup
+"""
+import json
+import sys
+from datetime import datetime
+from pathlib import Path
+
+STATUS_FILE = Path("/mnt/nas/supabase/.backup_status.json")
+MAX_AGE_HOURS = 25
+
+
+def main():
+    if not STATUS_FILE.exists():
+        print("2 Supabase_Backup - CRIT: status file not found — backup may never have run")
+        sys.exit(0)
+
+    try:
+        status = json.loads(STATUS_FILE.read_text())
+    except Exception as e:
+        print(f"2 Supabase_Backup - CRIT: could not read status file: {e}")
+        sys.exit(0)
+
+    success = status.get("success", False)
+    message = status.get("message", "unknown")
+    size_mb = status.get("size_mb", 0)
+    timestamp = status.get("timestamp", "")
+
+    try:
+        last_run = datetime.fromisoformat(timestamp)
+        age_hours = (datetime.now() - last_run).total_seconds() / 3600
+        age_str = f"{age_hours:.1f}h ago"
+    except Exception:
+        age_hours = 999
+        age_str = "unknown"
+
+    if not success:
+        print(f"2 Supabase_Backup size_mb={size_mb} CRIT: last backup failed ({age_str}) — {message}")
+    elif age_hours > MAX_AGE_HOURS:
+        print(f"2 Supabase_Backup size_mb={size_mb} CRIT: last backup too old ({age_str}) — {message}")
+    else:
+        print(f"0 Supabase_Backup size_mb={size_mb} OK: {message} ({age_str})")
+
+
+main()

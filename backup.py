@@ -1,6 +1,7 @@
 import os
 import subprocess
 import gzip
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -12,10 +13,21 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 DISCORD_WEBHOOK = os.environ["DISCORD_WEBHOOK"]
 BACKUP_DIR = Path(os.environ.get("BACKUP_DIR", "/backups"))
 SCHEDULE_TIME = os.environ.get("SCHEDULE_TIME", "01:00")
+STATUS_FILE = BACKUP_DIR / ".backup_status.json"
 
 KEEP_DAILY = int(os.environ.get("KEEP_DAILY", "7"))
 KEEP_WEEKLY = int(os.environ.get("KEEP_WEEKLY", "4"))
 KEEP_MONTHLY = int(os.environ.get("KEEP_MONTHLY", "3"))
+
+
+def write_status(success: bool, message: str, size_mb: float = 0):
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    STATUS_FILE.write_text(json.dumps({
+        "success": success,
+        "message": message,
+        "size_mb": size_mb,
+        "timestamp": datetime.now().isoformat(),
+    }))
 
 
 def send_discord(title: str, message: str, success: bool):
@@ -32,13 +44,6 @@ def send_discord(title: str, message: str, success: bool):
 
 
 def prune_backups():
-    """
-    Retain:
-      - one backup per day for the last KEEP_DAILY days
-      - one backup per week for the last KEEP_WEEKLY weeks
-      - one backup per month for the last KEEP_MONTHLY months
-    Everything else is deleted.
-    """
     now = datetime.now()
     all_backups = sorted(BACKUP_DIR.glob("streamwizard-*.sql.gz"), reverse=True)
 
@@ -118,6 +123,8 @@ def run_backup():
         removed = prune_backups()
         remaining = len(list(BACKUP_DIR.glob("*.sql.gz")))
 
+        write_status(True, f"Backup succeeded — {size_mb:.2f} MB, {remaining} total kept", size_mb)
+
         send_discord(
             "✅ Supabase Backup Succeeded",
             f"**File:** `{output_file.name}`\n"
@@ -131,6 +138,7 @@ def run_backup():
     except Exception as e:
         if output_file.exists():
             output_file.unlink()
+        write_status(False, str(e))
         send_discord("❌ Supabase Backup Failed", f"**Error:** {e}", False)
         print(f"[{datetime.now()}] Backup failed: {e}")
 
