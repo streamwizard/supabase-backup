@@ -1,0 +1,11 @@
+services:
+  supabase-backup:
+    build: .
+    restart: always
+    volumes:
+      - /mnt/nas/supabase:/backups
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK}
+      - SCHEDULE_TIME=01:00
+      - KEEP_DAYS=30
