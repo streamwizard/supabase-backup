@@ -6,6 +6,7 @@ services:
       - /mnt/backups/supabase:/backups
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
+      - PGPASSWORD=${PGPASSWORD}
       - DISCORD_WEBHOOK=${DISCORD_WEBHOOK}
       - SCHEDULE_TIME=01:00
       - KEEP_DAILY=7
