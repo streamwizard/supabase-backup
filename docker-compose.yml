@@ -3,7 +3,7 @@ services:
     build: .
     restart: always
     volumes:
-      - /mnt/nas/supabase:/backups
+      - /mnt/backups/supabase:/backups
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - DISCORD_WEBHOOK=${DISCORD_WEBHOOK}
