@@ -10,6 +10,7 @@ import schedule
 import time
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
+PGPASSWORD = os.environ["PGPASSWORD"]
 DISCORD_WEBHOOK = os.environ["DISCORD_WEBHOOK"]
 BACKUP_DIR = Path(os.environ.get("BACKUP_DIR", "/backups"))
 SCHEDULE_TIME = os.environ.get("SCHEDULE_TIME", "01:00")
@@ -107,6 +108,7 @@ def run_backup():
         result = subprocess.run(
             ["pg_dump", SUPABASE_URL],
             capture_output=True,
+            env={**os.environ, "PGPASSWORD": PGPASSWORD},
         )
 
         if result.returncode != 0:
