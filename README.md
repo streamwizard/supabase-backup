@@ -40,6 +40,8 @@ nano .env
 
 ```env
 # Supabase connection — password separate to avoid URL encoding issues with special characters
+# Find your connection string at: Supabase Dashboard → Project → Settings → Database → Connection string → URI
+# Find your password at: Supabase Dashboard → Project → Settings → Database → Database password
 SUPABASE_URL=postgresql://postgres.YOUR_PROJECT_REF@aws-0-eu-central-1.pooler.supabase.com:5432/postgres
 PGPASSWORD=your_supabase_database_password
 
