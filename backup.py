@@ -123,10 +123,15 @@ def run_backup():
             env={**os.environ, "PGPASSWORD": PGPASSWORD},
         )
 
+        raw_data = b""
+        if roles_result.returncode == 0:
+            raw_data += roles_result.stdout
+        raw_data += result.stdout
+
+        raw_size_mb = len(raw_data) / 1024 / 1024
+
         with gzip.open(output_file, "wb") as f:
-            if roles_result.returncode == 0:
-                f.write(roles_result.stdout)
-            f.write(result.stdout)
+            f.write(raw_data)
 
         size_mb = output_file.stat().st_size / 1024 / 1024
 
@@ -136,12 +141,13 @@ def run_backup():
         removed = prune_backups()
         remaining = len(list(BACKUP_DIR.glob("*.sql.gz")))
 
-        write_status(True, f"Backup succeeded — {size_mb:.2f} MB, {remaining} total kept", size_mb)
+        write_status(True, f"Backup succeeded — {size_mb:.2f} MB compressed, {remaining} total kept", size_mb)
 
         send_discord(
             "✅ Supabase Backup Succeeded",
             f"**File:** `{output_file.name}`\n"
-            f"**Size:** {size_mb:.2f} MB\n"
+            f"**Size (raw):** {raw_size_mb:.2f} MB\n"
+            f"**Size (compressed):** {size_mb:.2f} MB\n"
             f"**Retention:** {KEEP_DAILY}d daily / {KEEP_WEEKLY}w weekly / {KEEP_MONTHLY}m monthly\n"
             f"**Pruned:** {len(removed)} backup(s) — {remaining} total kept",
             True,
