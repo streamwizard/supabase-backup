@@ -92,17 +92,30 @@ Backups are saved as `streamwizard-YYYY-MM-DD_HH-MM.sql.gz.gpg` — gzip compres
 
 ## Restoring a backup
 
+### Quick inspect (first 50 lines of SQL)
+
 ```bash
-# Decrypt and decompress
-gpg --decrypt streamwizard-2026-06-01_01-00.sql.gz.gpg | zcat > restore.sql
+gpg --decrypt streamwizard-2026-06-01_01-00.sql.gz.gpg | zcat | head -50
+```
 
-# Restore to a temp Postgres container
+### Full restore + browse with DBeaver
+
+```bash
+# 1. Start a temp Postgres container
 docker run --name temp-db -e POSTGRES_PASSWORD=test -p 5432:5432 -d postgres:17
-docker exec -i temp-db psql -U postgres < restore.sql
 
-# Clean up
+# 2. Decrypt and restore
+gpg --decrypt streamwizard-2026-06-01_01-00.sql.gz.gpg | zcat | docker exec -i temp-db psql -U postgres
+
+# 3. Connect DBeaver to:
+#    Host:     your server IP
+#    Port:     5432
+#    Database: postgres
+#    Username: postgres
+#    Password: test
+
+# 4. Clean up when done — removes container and all data
 docker rm -f temp-db
-rm restore.sql
 ```
 
 ## GDPR notes
