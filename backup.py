@@ -105,8 +105,9 @@ def run_backup():
     try:
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
+        # full schema + data + RLS policies + privileges
         result = subprocess.run(
-            ["pg_dump", SUPABASE_URL],
+            ["pg_dump", "--no-password", SUPABASE_URL],
             capture_output=True,
             env={**os.environ, "PGPASSWORD": PGPASSWORD},
         )
@@ -114,7 +115,17 @@ def run_backup():
         if result.returncode != 0:
             raise RuntimeError(result.stderr.decode())
 
+        # global roles and permissions
+        roles_result = subprocess.run(
+            ["pg_dumpall", "--globals-only", "--no-password",
+             "-d", SUPABASE_URL],
+            capture_output=True,
+            env={**os.environ, "PGPASSWORD": PGPASSWORD},
+        )
+
         with gzip.open(output_file, "wb") as f:
+            if roles_result.returncode == 0:
+                f.write(roles_result.stdout)
             f.write(result.stdout)
 
         size_mb = output_file.stat().st_size / 1024 / 1024
