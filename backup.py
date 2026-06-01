@@ -12,6 +12,7 @@ import time
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 PGPASSWORD = os.environ["PGPASSWORD"]
 DISCORD_WEBHOOK = os.environ["DISCORD_WEBHOOK"]
+BACKUP_PASSPHRASE = os.environ["BACKUP_PASSPHRASE"]
 BACKUP_DIR = Path(os.environ.get("BACKUP_DIR", "/backups"))
 SCHEDULE_TIME = os.environ.get("SCHEDULE_TIME", "01:00")
 STATUS_FILE = BACKUP_DIR / ".backup_status.json"
@@ -46,15 +47,14 @@ def send_discord(title: str, message: str, success: bool):
 
 def prune_backups():
     now = datetime.now()
-    all_backups = sorted(BACKUP_DIR.glob("streamwizard-*.sql.gz"), reverse=True)
+    all_backups = sorted(BACKUP_DIR.glob("streamwizard-*.sql.gz.gpg"), reverse=True)
 
     keep = set()
 
-    # daily — one per day for last N days
     seen_days = set()
     for f in all_backups:
         try:
-            dt = datetime.strptime(f.stem.replace("streamwizard-", "").replace(".sql", ""), "%Y-%m-%d_%H-%M")
+            dt = datetime.strptime(f.name.replace("streamwizard-", "").replace(".sql.gz.gpg", ""), "%Y-%m-%d_%H-%M")
         except ValueError:
             continue
         day_key = dt.date()
@@ -62,11 +62,10 @@ def prune_backups():
             keep.add(f)
             seen_days.add(day_key)
 
-    # weekly — one per ISO week for last N weeks
     seen_weeks = set()
     for f in all_backups:
         try:
-            dt = datetime.strptime(f.stem.replace("streamwizard-", "").replace(".sql", ""), "%Y-%m-%d_%H-%M")
+            dt = datetime.strptime(f.name.replace("streamwizard-", "").replace(".sql.gz.gpg", ""), "%Y-%m-%d_%H-%M")
         except ValueError:
             continue
         week_key = dt.isocalendar()[:2]
@@ -75,11 +74,10 @@ def prune_backups():
             keep.add(f)
             seen_weeks.add(week_key)
 
-    # monthly — one per month for last N months
     seen_months = set()
     for f in all_backups:
         try:
-            dt = datetime.strptime(f.stem.replace("streamwizard-", "").replace(".sql", ""), "%Y-%m-%d_%H-%M")
+            dt = datetime.strptime(f.name.replace("streamwizard-", "").replace(".sql.gz.gpg", ""), "%Y-%m-%d_%H-%M")
         except ValueError:
             continue
         month_key = (dt.year, dt.month)
@@ -100,7 +98,8 @@ def prune_backups():
 def run_backup():
     print(f"[{datetime.now()}] Starting backup...")
     date = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    output_file = BACKUP_DIR / f"streamwizard-{date}.sql.gz"
+    gz_file = BACKUP_DIR / f"streamwizard-{date}.sql.gz"
+    output_file = BACKUP_DIR / f"streamwizard-{date}.sql.gz.gpg"
 
     try:
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -117,8 +116,7 @@ def run_backup():
 
         # global roles and permissions
         roles_result = subprocess.run(
-            ["pg_dumpall", "--globals-only", "--no-password",
-             "-d", SUPABASE_URL],
+            ["pg_dumpall", "--globals-only", "--no-password", "-d", SUPABASE_URL],
             capture_output=True,
             env={**os.environ, "PGPASSWORD": PGPASSWORD},
         )
@@ -130,24 +128,47 @@ def run_backup():
 
         raw_size_mb = len(raw_data) / 1024 / 1024
 
-        with gzip.open(output_file, "wb") as f:
-            f.write(raw_data)
+        # compress
+        gz_data = gzip.compress(raw_data)
+
+        # encrypt with AES-256 — passphrase passed via fd to keep it out of argv
+        pp_read_fd, pp_write_fd = os.pipe()
+        os.write(pp_write_fd, BACKUP_PASSPHRASE.encode() + b"\n")
+        os.close(pp_write_fd)
+
+        gpg_result = subprocess.run(
+            [
+                "gpg", "--batch", "--yes",
+                "--passphrase-fd", str(pp_read_fd),
+                "--pinentry-mode", "loopback",
+                "--symmetric", "--cipher-algo", "AES256",
+                "--output", str(output_file),
+            ],
+            input=gz_data,
+            capture_output=True,
+            pass_fds=(pp_read_fd,),
+        )
+        os.close(pp_read_fd)
+
+        if gpg_result.returncode != 0:
+            raise RuntimeError(f"GPG encryption failed: {gpg_result.stderr.decode()}")
 
         size_mb = output_file.stat().st_size / 1024 / 1024
 
         if size_mb < 0.01:
-            raise RuntimeError("Dump is suspiciously small (< 10KB) — possible empty backup")
+            raise RuntimeError("Backup is suspiciously small (< 10KB) — possible empty backup")
 
         removed = prune_backups()
-        remaining = len(list(BACKUP_DIR.glob("*.sql.gz")))
+        remaining = len(list(BACKUP_DIR.glob("*.sql.gz.gpg")))
 
-        write_status(True, f"Backup succeeded — {size_mb:.2f} MB compressed, {remaining} total kept", size_mb)
+        write_status(True, f"Backup succeeded — {size_mb:.2f} MB encrypted, {remaining} total kept", size_mb)
 
         send_discord(
             "✅ Supabase Backup Succeeded",
             f"**File:** `{output_file.name}`\n"
             f"**Size (raw):** {raw_size_mb:.2f} MB\n"
-            f"**Size (compressed):** {size_mb:.2f} MB\n"
+            f"**Size (compressed+encrypted):** {size_mb:.2f} MB\n"
+            f"**Encrypted:** AES-256\n"
             f"**Retention:** {KEEP_DAILY}d daily / {KEEP_WEEKLY}w weekly / {KEEP_MONTHLY}m monthly\n"
             f"**Pruned:** {len(removed)} backup(s) — {remaining} total kept",
             True,
@@ -155,8 +176,9 @@ def run_backup():
         print(f"[{datetime.now()}] Backup completed: {output_file} ({size_mb:.2f} MB), pruned {len(removed)}")
 
     except Exception as e:
-        if output_file.exists():
-            output_file.unlink()
+        for f in [gz_file, output_file]:
+            if f.exists():
+                f.unlink()
         write_status(False, str(e))
         send_discord("❌ Supabase Backup Failed", f"**Error:** {e}", False)
         print(f"[{datetime.now()}] Backup failed: {e}")
