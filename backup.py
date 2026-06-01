@@ -106,7 +106,7 @@ def run_backup():
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
         result = subprocess.run(
-            ["pg_dump", SUPABASE_URL],
+            ["pg_dump", "--schema=public", "--schema=auth", "--schema=storage", SUPABASE_URL],
             capture_output=True,
             env={**os.environ, "PGPASSWORD": PGPASSWORD},
         )
